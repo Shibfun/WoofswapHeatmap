@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Woofswap Heatmap TOP100</title>
+    <title>Woofswap Heatmap</title>
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="https://woofswap.finance/image/tokens/WOOF.png" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -14,14 +14,16 @@
             margin: 0;
             padding: 20px;
             color: #333;
+            overflow-x: hidden; /* Prevent horizontal overflow */
         }
         .container {
-            max-width: 1200px;
+            max-width: 100%; /* Ensure container fits screen width */
             margin: 0 auto;
             background-color: #fff;
             border-radius: 10px;
             padding: 20px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            box-sizing: border-box; /* Include padding in width calculation */
         }
         h1 {
             font-size: 24px;
@@ -135,38 +137,61 @@
         }
         /* Mobile adaptation */
         @media (max-width: 768px) {
+            body {
+                padding: 10px; /* Reduce padding for mobile */
+            }
             .container {
                 padding: 10px;
+                width: 100%; /* Ensure container fits screen */
+                max-width: none; /* Remove max-width constraint */
             }
             .grid-container {
                 width: 100%; /* Use full width on mobile */
-                max-width: 300px; /* Smaller square for mobile */
-                height: 300px;
+                max-width: none; /* Remove max-width */
+                height: auto; /* Will be set dynamically in JS */
                 margin: 0 auto;
             }
             .grid-item {
-                padding: 2px; /* Reduce padding for mobile */
+                padding: 1px; /* Further reduce padding for mobile */
+                border-width: 0.5px; /* Thinner border to save space */
             }
-            .token-symbol, .price-change, .txn {
-                font-size: 8px !important; /* Smaller font for mobile */
+            .token-symbol {
+                font-size: 9px !important; /* Adjusted for better fit */
+                margin-bottom: 0.5px;
+            }
+            .price-change {
+                font-size: 7px !important;
+                margin-bottom: 0.5px;
             }
             .txn {
-                font-size: 6px !important; /* Even smaller for TXN on mobile */
+                font-size: 6px !important;
+            }
+            h1 {
+                font-size: 18px; /* Smaller title on mobile */
+            }
+            .note, .footer {
+                font-size: 10px; /* Smaller text on mobile */
             }
             .download-btn {
                 font-size: 14px;
                 padding: 8px 16px;
+                width: 90%; /* Wider button for easier tapping */
+                max-width: 200px;
+            }
+            .tooltip {
+                width: 150px; /* Smaller tooltip on mobile */
+                font-size: 10px;
             }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Woofswap Pools TOP100 by Market Cap (24h) - BONE Pairs</h1>
+        <h1>Woofswap Market Cap Heatmap - BONE Pairs</h1>
         <div id="pool-grid" class="loading">Loading...</div>
         <button id="download-btn" class="download-btn" style="display: none;">Download as PNG</button>
         <div class="note">
-            Data Source: GeckoTerminal API | Auto-updates every 6 hours
+            Data Source: GeckoTerminal API | Auto-updates every 10 minutes
         </div>
         <div class="footer">
             © 2025 Woofswap. All rights reserved.
@@ -178,16 +203,33 @@
         let CELL_SIZE = 60; // Default cell size for PC (600px / 10)
         let CONTAINER_SIZE = 600; // Default container size
 
+        // List of tokens to exclude
+        const EXCLUDED_TOKENS = ['WETH', 'USDT', 'USDC', 'DAI', 'BTC'];
+
         // Adjust container and cell size dynamically based on pool count and screen size
         function adjustContainerSize(poolCount) {
             const container = document.getElementById('pool-grid');
             const windowWidth = window.innerWidth;
             const isMobile = windowWidth <= 768;
-            const baseContainerSize = isMobile ? 300 : 600; // Smaller size for mobile
+            let baseContainerSize;
+
+            if (isMobile) {
+                // Dynamically adjust container size to fit screen width on mobile
+                baseContainerSize = Math.min(windowWidth - 20, 320); // Account for padding (10px on each side)
+            } else {
+                baseContainerSize = 600; // Default for desktop
+            }
+
             const totalCellsNeeded = GRID_SIZE * GRID_SIZE; // Total cells in grid (100 for 10x10)
-            const cellsPerPool = Math.floor(totalCellsNeeded / poolCount); // Average cells per pool
+            const cellsPerPool = Math.ceil(totalCellsNeeded / poolCount); // Average cells per pool, rounded up
             const gridSizeToUse = Math.ceil(Math.sqrt(poolCount * cellsPerPool)); // Adjust grid size to fill
             CONTAINER_SIZE = gridSizeToUse * (baseContainerSize / GRID_SIZE); // Adjust based on grid size
+
+            // Ensure CONTAINER_SIZE does not exceed window width on mobile
+            if (isMobile) {
+                CONTAINER_SIZE = Math.min(CONTAINER_SIZE, windowWidth - 20);
+            }
+
             container.style.width = `${CONTAINER_SIZE}px`;
             container.style.height = `${CONTAINER_SIZE}px`; // Ensure square
             CELL_SIZE = CONTAINER_SIZE / GRID_SIZE; // Recalculate cell size
@@ -198,17 +240,17 @@
             const minMarketCap = 1000;
             const maxMarketCap = 1000000;
             const minGrid = 1; // Minimum 1x1
-            const maxGrid = 4; // Maximum 4x4
+            const maxGrid = 5; // Increased to 5 to reduce "More" fillers
 
             const normalizedMarketCap = Math.min(Math.max(marketCap, minMarketCap), maxMarketCap);
             let gridSize = minGrid + Math.round((maxGrid - minGrid) * (Math.log(normalizedMarketCap) - Math.log(minMarketCap)) / (Math.log(maxMarketCap) - Math.log(minMarketCap)));
 
-            // Dynamically adjust gridSize to ensure the grid is filled
+            // Dynamically adjust gridSize to ensure the grid is filled with fewer "More" fillers
             const totalCells = GRID_SIZE * GRID_SIZE;
-            const avgCellsPerPool = Math.floor(totalCells / poolCount);
+            const avgCellsPerPool = Math.ceil(totalCells / poolCount); // Round up to fill more space
             gridSize = Math.min(gridSize, avgCellsPerPool, GRID_SIZE);
 
-            return Math.max(gridSize, 1); // Ensure at least 1x1
+            return Math.max(gridSize, minGrid); // Ensure at least 1x1
         }
 
         // Optimized layout algorithm: place larger pools first, then fill with smaller ones
@@ -301,18 +343,21 @@
                 }
                 console.log('All pools:', allPools);
 
-                // Filter for Woofswap pools and BONE pairs
+                // Filter for Woofswap pools and BONE pairs, excluding specific tokens
                 const woofswapPools = allPools.filter(pool => {
                     const dexId = pool.relationships?.dex?.data?.id?.toLowerCase();
                     const name = pool.attributes.name || 'N/A';
                     const [token1, token2] = name.split(' / ').map(t => t.trim());
                     // Check if the pool is a Woofswap pool and involves BONE or WBONE
-                    return dexId?.includes('woofswap') && (token1 === 'BONE' || token2 === 'BONE' || token1 === 'WBONE' || token2 === 'WBONE');
+                    const isWoofswapBonePool = dexId?.includes('woofswap') && (token1 === 'BONE' || token2 === 'BONE' || token1 === 'WBONE' || token2 === 'WBONE');
+                    // Exclude pools involving WETH, USDT, USDC, DAI, or BTC
+                    const involvesExcludedToken = EXCLUDED_TOKENS.includes(token1) || EXCLUDED_TOKENS.includes(token2);
+                    return isWoofswapBonePool && !involvesExcludedToken;
                 });
-                console.log('Woofswap BONE pools:', woofswapPools);
+                console.log('Filtered Woofswap BONE pools (excluding WETH, USDT, USDC, DAI, BTC):', woofswapPools);
 
                 if (woofswapPools.length === 0) {
-                    gridContainer.innerHTML = '<div class="error">No Woofswap pools with BONE found.</div>';
+                    gridContainer.innerHTML = '<div class="error">No Woofswap pools with BONE found (excluding WETH, USDT, USDC, DAI, BTC).</div>';
                     return;
                 }
 
@@ -354,7 +399,7 @@
                     .slice(0, 100);
 
                 if (sortedPools.length === 0) {
-                    gridContainer.innerHTML = '<div class="error">No valid BONE pool data.</div>';
+                    gridContainer.innerHTML = '<div class="error">No valid BONE pool data (excluding WETH, USDT, USDC, DAI, BTC).</div>';
                     return;
                 }
 
@@ -422,9 +467,9 @@
             }
         }
 
-        // Auto-update every 6 hours
+        // Auto-update every 10 minutes
         function startAutoUpdate() {
-            setInterval(fetchWoofswapPools, 6 * 60 * 60 * 1000);
+            setInterval(fetchWoofswapPools, 10 * 60 * 1000); // 10 minutes
         }
 
         // Initial load and start auto-update
