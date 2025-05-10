@@ -189,7 +189,7 @@
         <div id="pool-grid" class="loading">Loading...</div>
         <button id="download-btn" class="download-btn" style="display: none;">Download as PNG</button>
         <div class="note">
-            Data Source: GeckoTerminal API | Auto-updates every 1 minute
+            Data Source: GeckoTerminal API | Auto-updates every 100 minutes
         </div>
         <div class="footer">
             © 2025 Shibarium Heatmap. All rights reserved.
@@ -202,7 +202,7 @@
         let CONTAINER_SIZE = 600; // Default container size
 
         // List of tokens to exclude
-        const EXCLUDED_TOKENS = ['WETH', 'USDT', 'USDC', 'DAI', 'BTC', 'knBONE']; // Added knBONE to excluded tokens
+        const EXCLUDED_TOKENS = ['WETH', 'USDT', 'USDC', 'DAI', 'BTC', 'knBONE'];
 
         // Adjust container and cell size dynamically based on pool count and screen size
         function adjustContainerSize(poolCount) {
@@ -319,17 +319,20 @@
             try {
                 let allPools = [];
                 let page = 1;
-                const targetPoolCount = 50;
+                const targetPoolCount = 100; // Target 100 pools
+                const maxPages = 20; // Increased to ensure more data
                 let hasMoreData = true;
 
-                while (hasMoreData && allPools.length < targetPoolCount * 2) {
-                    const response = await fetch(`https://api.geckoterminal.com/api/v2/networks/shibarium/pools?include=dex,base_token,quote_token&page=${page}`, {
+                while (hasMoreData && page <= maxPages) {
+                    const response = await fetch(`https://api.geckoterminal.com/api/v2/networks/shibarium/pools?include=dex,base_token,quote_token&page=${page}&per_page=100`, {
                         headers: { 'accept': 'application/json' }
                     });
                     if (!response.ok) throw new Error(`API request failed: ${response.status}`);
 
                     const data = await response.json();
                     const pools = data.data || [];
+
+                    console.log(`Page ${page}: Fetched ${pools.length} pools`);
 
                     if (pools.length === 0) {
                         hasMoreData = false;
@@ -338,8 +341,9 @@
 
                     allPools = allPools.concat(pools);
                     page++;
+                    if (allPools.length >= targetPoolCount) break; // Stop if we have enough pools
                 }
-                console.log(`Fetched ${allPools.length} pools across ${page - 1} pages`);
+                console.log(`Total fetched: ${allPools.length} pools across ${page - 1} pages`);
 
                 // Filter for Shibarium pools, BONE/WBONE pairs, excluding specific tokens
                 const shibariumPools = allPools.filter(pool => {
@@ -354,21 +358,35 @@
                     // Exclude pools involving WETH, USDT, USDC, DAI, BTC, or knBONE
                     const involvesExcludedToken = EXCLUDED_TOKENS.includes(token1) || EXCLUDED_TOKENS.includes(token2);
 
+                    if (!isBonePair) {
+                        console.log(`Filtered out pool (not BONE/WBONE pair): ${name}`);
+                    }
+                    if (involvesExcludedToken) {
+                        console.log(`Filtered out pool (contains excluded token): ${name}`);
+                    }
+
                     return isBonePair && !involvesExcludedToken;
                 });
-                console.log('Filtered Shibarium BONE/WBONE pools (excluding WETH, USDT, USDC, DAI, BTC, knBONE):', shibariumPools);
+                console.log(`Filtered Shibarium BONE/WBONE pools (excluding WETH, USDT, USDC, DAI, BTC, knBONE): ${shibariumPools.length} pools`);
 
                 if (shibariumPools.length === 0) {
                     gridContainer.innerHTML = '<div class="error">No Shibarium pools with BONE/WBONE found (excluding WETH, USDT, USDC, DAI, BTC, knBONE).</div>';
                     return;
                 }
 
-                // Process pool data and handle duplicate token symbols by keeping the pool with highest liquidity
+                // Process pool data and handle duplicate token symbols
                 const poolsWithDetails = shibariumPools
                     .filter(pool => {
                         const name = pool.attributes.name || 'N/A';
                         const [token1, token2] = name.split(' / ').map(t => t.trim());
-                        return token1 !== token2;
+                        const hasValidData = pool.attributes.reserve_in_usd && parseFloat(pool.attributes.reserve_in_usd) > 0;
+                        if (!hasValidData) {
+                            console.log(`Filtered out pool due to invalid liquidity: ${name}`);
+                        }
+                        if (token1 === token2) {
+                            console.log(`Filtered out pool (same tokens): ${name}`);
+                        }
+                        return token1 !== token2 && hasValidData;
                     })
                     .map(pool => {
                         const attributes = pool.attributes;
@@ -385,17 +403,29 @@
                         const liquidity = parseFloat(attributes.reserve_in_usd || 0);
                         const gridSize = calculateGridSize(liquidity, shibariumPools.length);
                         const priceChange = parseFloat(attributes.price_change_percentage?.h24 || 0).toFixed(2);
+                        const volume = parseFloat(attributes.volume_usd?.h24 || 0).toFixed(2);
                         const txn = parseInt(attributes.transactions?.h24?.buys || 0) + parseInt(attributes.transactions?.h24?.sells || 0);
+                        if (!attributes.price_change_percentage?.h24) {
+                            console.log(`Missing 24h price change for pool: ${name}`);
+                        }
+                        if (!attributes.volume_usd?.h24) {
+                            console.log(`Missing 24h volume for pool: ${name}`);
+                        }
+                        if (!attributes.transactions?.h24) {
+                            console.log(`Missing 24h transactions for pool: ${name}`);
+                        }
                         return {
                             name: displayName,
-                            rawToken: (token1 === 'WBONE' || token1 === 'BONE') ? token2 : token1, // Track raw token for deduplication
+                            rawToken: (token1 === 'WBONE' || token1 === 'BONE') ? token2 : token1,
                             priceChange: priceChange,
                             liquidity: liquidity,
                             gridSize: gridSize,
-                            volume: parseFloat(attributes.volume_usd?.h24 || 0).toFixed(2),
+                            volume: volume,
                             txn: txn
                         };
                     });
+
+                console.log(`Pools after initial processing: ${poolsWithDetails.length}`);
 
                 // Deduplicate by token symbol, keeping the pool with the highest liquidity
                 const uniquePools = [];
@@ -404,20 +434,38 @@
                     const token = pool.rawToken;
                     if (!tokenMap.has(token) || tokenMap.get(token).liquidity < pool.liquidity) {
                         tokenMap.set(token, pool);
+                    } else {
+                        console.log(`Duplicate token ${token} skipped (lower liquidity): ${pool.name}`);
                     }
                 });
                 uniquePools.push(...tokenMap.values());
 
-                const sortedPools = uniquePools
-                    .sort((a, b) => b.liquidity - a.liquidity) // Sort by liquidity
-                    .slice(0, 50);
+                console.log(`Pools after deduplication: ${uniquePools.length}`);
+
+                // If unique pools are less than 50, supplement with remaining pools
+                let sortedPools = uniquePools.sort((a, b) => b.liquidity - a.liquidity);
+                if (sortedPools.length < 50) {
+                    console.log(`Unique pools (${sortedPools.length}) less than 50, supplementing with remaining pools`);
+                    const usedTokens = new Set(sortedPools.map(pool => pool.rawToken));
+                    const remainingPools = poolsWithDetails
+                        .filter(pool => !usedTokens.has(pool.rawToken))
+                        .sort((a, b) => b.liquidity - a.liquidity);
+                    sortedPools = [
+                        ...sortedPools,
+                        ...remainingPools.slice(0, 50 - sortedPools.length)
+                    ].sort((a, b) => b.liquidity - a.liquidity);
+                    console.log(`After supplementation: ${sortedPools.length} pools`);
+                }
+
+                // Limit to top 50 pools
+                sortedPools = sortedPools.slice(0, 50);
 
                 if (sortedPools.length === 0) {
                     gridContainer.innerHTML = '<div class="error">No valid BONE/WBONE pool data (excluding WETH, USDT, USDC, DAI, BTC, knBONE).</div>';
                     return;
                 }
 
-                console.log('Final pools to display (sorted by liquidity, deduplicated):', sortedPools);
+                console.log('Final pools to display (top 50, sorted by liquidity):', sortedPools);
 
                 adjustContainerSize(sortedPools.length);
 
@@ -478,9 +526,9 @@
             }
         }
 
-        // Auto-update every 100 minute
+        // Auto-update every 100 minutes
         function startAutoUpdate() {
-            setInterval(fetchShibariumPools, 100 * 60 * 1000); // 100 minute
+            setInterval(fetchShibariumPools, 100 * 60 * 1000); // 100 minutes
         }
 
         // Initial load and start auto-update
