@@ -478,9 +478,9 @@
             }
         }
 
-        // Auto-update every 1 minute
+        // Auto-update every 100 minute
         function startAutoUpdate() {
-            setInterval(fetchShibariumPools, 1 * 60 * 1000); // 1 minute
+            setInterval(fetchShibariumPools, 100 * 60 * 1000); // 100 minute
         }
 
         // Initial load and start auto-update
