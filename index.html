@@ -333,7 +333,7 @@
                 // Fetch pools dynamically until we get enough or no more data
                 let allPools = [];
                 let page = 1;
-                const targetPoolCount = 50; // Target number of pools to display (changed from 100 to 50)
+                const targetPoolCount = 50; // Target number of pools to display
                 let hasMoreData = true;
 
                 while (hasMoreData && allPools.length < targetPoolCount * 2) { // Buffer to ensure enough pools after filtering
@@ -355,21 +355,28 @@
                 }
                 console.log(`Fetched ${allPools.length} pools across ${page - 1} pages`);
 
-                // Filter for Woofswap pools and BONE pairs, excluding specific tokens
+                // Filter for Woofswap pools and strictly BONE/WBONE pairs, excluding specific tokens
                 const woofswapPools = allPools.filter(pool => {
                     const dexId = pool.relationships?.dex?.data?.id?.toLowerCase();
                     const name = pool.attributes.name || 'N/A';
                     const [token1, token2] = name.split(' / ').map(t => t.trim());
-                    // Check if the pool is a Woofswap pool and involves BONE or WBONE
-                    const isWoofswapBonePool = dexId?.includes('woofswap') && (token1 === 'BONE' || token2 === 'BONE' || token1 === 'WBONE' || token2 === 'WBONE');
+
+                    // Check if the pool is a Woofswap pool
+                    const isWoofswapPool = dexId?.includes('woofswap');
+                    // Check if one of the tokens is strictly BONE or WBONE
+                    const isBonePair = (token1 === 'BONE' && token2 !== 'BONE') || 
+                                      (token2 === 'BONE' && token1 !== 'BONE') || 
+                                      (token1 === 'WBONE' && token2 !== 'WBONE') || 
+                                      (token2 === 'WBONE' && token1 !== 'WBONE');
                     // Exclude pools involving WETH, USDT, USDC, DAI, or BTC
                     const involvesExcludedToken = EXCLUDED_TOKENS.includes(token1) || EXCLUDED_TOKENS.includes(token2);
-                    return isWoofswapBonePool && !involvesExcludedToken;
+
+                    return isWoofswapPool && isBonePair && !involvesExcludedToken;
                 });
-                console.log('Filtered Woofswap BONE pools (excluding WETH, USDT, USDC, DAI, BTC):', woofswapPools);
+                console.log('Filtered Woofswap BONE/WBONE pools (excluding WETH, USDT, USDC, DAI, BTC):', woofswapPools);
 
                 if (woofswapPools.length === 0) {
-                    gridContainer.innerHTML = '<div class="error">No Woofswap pools with BONE found (excluding WETH, USDT, USDC, DAI, BTC).</div>';
+                    gridContainer.innerHTML = '<div class="error">No Woofswap pools with BONE/WBONE found (excluding WETH, USDT, USDC, DAI, BTC).</div>';
                     return;
                 }
 
@@ -405,17 +412,17 @@
                         };
                     });
 
-                // Sort by market cap and take top 50 (changed from 100 to 50)
+                // Sort by market cap (pool size) and take top 50
                 const sortedPools = poolsWithDetails
                     .sort((a, b) => b.marketCap - a.marketCap)
                     .slice(0, 50);
 
                 if (sortedPools.length === 0) {
-                    gridContainer.innerHTML = '<div class="error">No valid BONE pool data (excluding WETH, USDT, USDC, DAI, BTC).</div>';
+                    gridContainer.innerHTML = '<div class="error">No valid BONE/WBONE pool data (excluding WETH, USDT, USDC, DAI, BTC).</div>';
                     return;
                 }
 
-                console.log('Final pools to display:', sortedPools);
+                console.log('Final pools to display (sorted by market cap):', sortedPools);
 
                 // Adjust container size based on pool count
                 adjustContainerSize(sortedPools.length);
