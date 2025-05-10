@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shibarium Heatmap</title>
+    <link rel="icon" type="image/png" href="https://via.placeholder.com/32?text=SHIB" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+            overflow-x: hidden;
+        }
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+            background-color: #fff;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            box-sizing: border-box;
+        }
+        h1 {
+            font-size: 24px;
+            text-align: center;
+            color: #0088cc;
+            margin-bottom: 20px;
+        }
+        .grid-container {
+            position: relative;
+            width: 600px;
+            height: 600px;
+            margin: 0 auto;
+            overflow: hidden;
+        }
+        .grid-item {
+            position: absolute;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            font-weight: bold;
+            color: #fff;
+            text-align: center;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .grid-item:hover {
+            z-index: 10;
+            transform: scale(1.02);
+        }
+        .grid-item.up {
+            background-color: #28a745;
+        }
+        .grid-item.down {
+            background-color: #dc3545;
+        }
+        .grid-item.more {
+            background-color: #28a745;
+            font-size: 14px;
+        }
+        .token-symbol {
+            margin-bottom: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .price-change {
+            margin-bottom: 2px;
+        }
+        .txn {
+            font-size: 10px;
+        }
+        .tooltip {
+            visibility: hidden;
+            width: 200px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 5px;
+            padding: 10px;
+            position: absolute;
+            z-index: 20;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 12px;
+        }
+        .grid-item:hover .tooltip {
+            visibility: visible;
+            opacity: 1;
+        }
+        .loading {
+            text-align: center;
+            font-size: 16px;
+            color: #0088cc;
+        }
+        .error {
+            text-align: center;
+            font-size: 16px;
+            color: #dc3545;
+        }
+        .note {
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            margin-top: 20px;
+        }
+        .footer {
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+        }
+        .download-btn {
+            display: block;
+            margin: 20px auto;
+            padding: 10px 20px;
+            background-color: #0088cc;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .download-btn:hover {
+            background-color: #006d9f;
+        }
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            .container {
+                padding: 10px;
+                width: 100%;
+                max-width: none;
+            }
+            .grid-container {
+                width: 100%;
+                max-width: none;
+                height: auto;
+                margin: 0 auto;
+            }
+            .grid-item {
+                padding: 1px;
+                border-width: 0.5px;
+            }
+            .token-symbol {
+                font-size: 9px !important;
+                margin-bottom: 0.5px;
+            }
+            .price-change {
+                font-size: 7px !important;
+                margin-bottom: 0.5px;
+            }
+            .txn {
+                font-size: 6px !important;
+            }
+            h1 {
+                font-size: 18px;
+            }
+            .note, .footer {
+                font-size: 10px;
+            }
+            .download-btn {
+                font-size: 14px;
+                padding: 8px 16px;
+                width: 90%;
+                max-width: 200px;
+            }
+            .tooltip {
+                width: 150px;
+                font-size: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Shibarium Heatmap</h1>
+        <div id="pool-grid" class="loading">Loading...</div>
+        <button id="download-btn" class="download-btn" style="display: none;">Download as PNG</button>
+        <div class="note">
+            Data Source: GeckoTerminal API | Auto-updates every 1 minute
+        </div>
+        <div class="footer">
+            © 2025 Shibarium Heatmap. All rights reserved.
+        </div>
+    </div>
+
+    <script>
+        const GRID_SIZE = 10; // 10x10 grid
+        let CELL_SIZE = 60; // Default cell size for PC (600px / 10)
+        let CONTAINER_SIZE = 600; // Default container size
+
+        // List of tokens to exclude
+        const EXCLUDED_TOKENS = ['WETH', 'USDT', 'USDC', 'DAI', 'BTC', 'knBONE']; // Added knBONE to excluded tokens
+
+        // Adjust container and cell size dynamically based on pool count and screen size
+        function adjustContainerSize(poolCount) {
+            const container = document.getElementById('pool-grid');
+            const windowWidth = window.innerWidth;
+            const isMobile = windowWidth <= 768;
+            let baseContainerSize;
+
+            if (isMobile) {
+                baseContainerSize = Math.min(windowWidth - 20, 320);
+            } else {
+                baseContainerSize = 600;
+            }
+
+            const totalCellsNeeded = GRID_SIZE * GRID_SIZE;
+            const cellsPerPool = Math.ceil(totalCellsNeeded / poolCount);
+            const gridSizeToUse = Math.ceil(Math.sqrt(poolCount * cellsPerPool));
+            CONTAINER_SIZE = gridSizeToUse * (baseContainerSize / GRID_SIZE);
+
+            if (isMobile) {
+                CONTAINER_SIZE = Math.min(CONTAINER_SIZE, windowWidth - 20);
+            }
+
+            container.style.width = `${CONTAINER_SIZE}px`;
+            container.style.height = `${CONTAINER_SIZE}px`;
+            CELL_SIZE = CONTAINER_SIZE / GRID_SIZE;
+        }
+
+        // Calculate how many grid cells a pool should occupy based on its liquidity
+        function calculateGridSize(liquidity, poolCount) {
+            const minLiquidity = 1000;
+            const maxLiquidity = 1000000;
+            const minGrid = 1;
+            const maxGrid = 5;
+
+            const normalizedLiquidity = Math.min(Math.max(liquidity, minLiquidity), maxLiquidity);
+            let gridSize = minGrid + Math.round((maxGrid - minGrid) * (Math.log(normalizedLiquidity) - Math.log(minLiquidity)) / (Math.log(maxLiquidity) - Math.log(minLiquidity)));
+
+            const totalCells = GRID_SIZE * GRID_SIZE;
+            const avgCellsPerPool = Math.ceil(totalCells / poolCount);
+            gridSize = Math.min(gridSize, avgCellsPerPool, GRID_SIZE);
+
+            return Math.max(gridSize, minGrid);
+        }
+
+        // Optimized layout algorithm: place larger pools first, then fill with smaller ones
+        function layoutItems(pools) {
+            const grid = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(false));
+            const positions = [];
+
+            const sortedPools = [...pools].sort((a, b) => b.gridSize - a.gridSize);
+
+            sortedPools.forEach(pool => {
+                let gridSize = Math.min(pool.gridSize, GRID_SIZE);
+                let placed = false;
+
+                for (let y = 0; y <= GRID_SIZE - gridSize && !placed; y++) {
+                    for (let x = 0; x <= GRID_SIZE - gridSize && !placed; x++) {
+                        let canPlace = true;
+                        for (let dy = 0; dy < gridSize; dy++) {
+                            for (let dx = 0; dx < gridSize; dx++) {
+                                if (y + dy >= GRID_SIZE || x + dx >= GRID_SIZE || grid[y + dy][x + dx]) {
+                                    canPlace = false;
+                                    break;
+                                }
+                            }
+                            if (!canPlace) break;
+                        }
+                        if (canPlace) {
+                            for (let dy = 0; dy < gridSize; dy++) {
+                                for (let dx = 0; dx < gridSize; dx++) {
+                                    grid[y + dy][x + dx] = true;
+                                }
+                            }
+                            positions.push({ x, y, gridSize, pool });
+                            placed = true;
+                        }
+                    }
+                }
+
+                if (!placed && gridSize > 1) {
+                    pool.gridSize = gridSize - 1;
+                    sortedPools.push(pool);
+                }
+            });
+
+            const remainingPools = pools.filter(pool => !positions.some(pos => pos.pool === pool));
+            for (let y = 0; y < GRID_SIZE && remainingPools.length > 0; y++) {
+                for (let x = 0; x < GRID_SIZE && remainingPools.length > 0; x++) {
+                    if (!grid[y][x]) {
+                        const pool = remainingPools.shift();
+                        grid[y][x] = true;
+                        positions.push({ x, y, gridSize: 1, pool });
+                    }
+                }
+            }
+
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    if (!grid[y][x]) {
+                        grid[y][x] = true;
+                        positions.push({ x, y, gridSize: 1, pool: { name: 'More', isPlaceholder: true } });
+                    }
+                }
+            }
+
+            return positions;
+        }
+
+        async function fetchShibariumPools() {
+            const gridContainer = document.getElementById('pool-grid');
+            gridContainer.innerHTML = '<div class="loading">Loading...</div>';
+
+            try {
+                let allPools = [];
+                let page = 1;
+                const targetPoolCount = 50;
+                let hasMoreData = true;
+
+                while (hasMoreData && allPools.length < targetPoolCount * 2) {
+                    const response = await fetch(`https://api.geckoterminal.com/api/v2/networks/shibarium/pools?include=dex,base_token,quote_token&page=${page}`, {
+                        headers: { 'accept': 'application/json' }
+                    });
+                    if (!response.ok) throw new Error(`API request failed: ${response.status}`);
+
+                    const data = await response.json();
+                    const pools = data.data || [];
+
+                    if (pools.length === 0) {
+                        hasMoreData = false;
+                        break;
+                    }
+
+                    allPools = allPools.concat(pools);
+                    page++;
+                }
+                console.log(`Fetched ${allPools.length} pools across ${page - 1} pages`);
+
+                // Filter for Shibarium pools, BONE/WBONE pairs, excluding specific tokens
+                const shibariumPools = allPools.filter(pool => {
+                    const name = pool.attributes.name || 'N/A';
+                    const [token1, token2] = name.split(' / ').map(t => t.trim());
+
+                    // Check if one of the tokens is strictly BONE or WBONE
+                    const isBonePair = (token1 === 'BONE' && token2 !== 'BONE') || 
+                                      (token2 === 'BONE' && token1 !== 'BONE') || 
+                                      (token1 === 'WBONE' && token2 !== 'WBONE') || 
+                                      (token2 === 'WBONE' && token1 !== 'WBONE');
+                    // Exclude pools involving WETH, USDT, USDC, DAI, BTC, or knBONE
+                    const involvesExcludedToken = EXCLUDED_TOKENS.includes(token1) || EXCLUDED_TOKENS.includes(token2);
+
+                    return isBonePair && !involvesExcludedToken;
+                });
+                console.log('Filtered Shibarium BONE/WBONE pools (excluding WETH, USDT, USDC, DAI, BTC, knBONE):', shibariumPools);
+
+                if (shibariumPools.length === 0) {
+                    gridContainer.innerHTML = '<div class="error">No Shibarium pools with BONE/WBONE found (excluding WETH, USDT, USDC, DAI, BTC, knBONE).</div>';
+                    return;
+                }
+
+                // Process pool data and handle duplicate token symbols by keeping the pool with highest liquidity
+                const poolsWithDetails = shibariumPools
+                    .filter(pool => {
+                        const name = pool.attributes.name || 'N/A';
+                        const [token1, token2] = name.split(' / ').map(t => t.trim());
+                        return token1 !== token2;
+                    })
+                    .map(pool => {
+                        const attributes = pool.attributes;
+                        let name = attributes.name || 'N/A';
+                        const [token1, token2] = name.split(' / ').map(t => t.trim());
+                        let displayName;
+                        if (token1 === 'WBONE' || token1 === 'BONE') {
+                            displayName = `$${token2}`;
+                        } else if (token2 === 'WBONE' || token2 === 'BONE') {
+                            displayName = `$${token1}`;
+                        } else {
+                            displayName = `$${token1}`;
+                        }
+                        const liquidity = parseFloat(attributes.reserve_in_usd || 0);
+                        const gridSize = calculateGridSize(liquidity, shibariumPools.length);
+                        const priceChange = parseFloat(attributes.price_change_percentage?.h24 || 0).toFixed(2);
+                        const txn = parseInt(attributes.transactions?.h24?.buys || 0) + parseInt(attributes.transactions?.h24?.sells || 0);
+                        return {
+                            name: displayName,
+                            rawToken: (token1 === 'WBONE' || token1 === 'BONE') ? token2 : token1, // Track raw token for deduplication
+                            priceChange: priceChange,
+                            liquidity: liquidity,
+                            gridSize: gridSize,
+                            volume: parseFloat(attributes.volume_usd?.h24 || 0).toFixed(2),
+                            txn: txn
+                        };
+                    });
+
+                // Deduplicate by token symbol, keeping the pool with the highest liquidity
+                const uniquePools = [];
+                const tokenMap = new Map();
+                poolsWithDetails.forEach(pool => {
+                    const token = pool.rawToken;
+                    if (!tokenMap.has(token) || tokenMap.get(token).liquidity < pool.liquidity) {
+                        tokenMap.set(token, pool);
+                    }
+                });
+                uniquePools.push(...tokenMap.values());
+
+                const sortedPools = uniquePools
+                    .sort((a, b) => b.liquidity - a.liquidity) // Sort by liquidity
+                    .slice(0, 50);
+
+                if (sortedPools.length === 0) {
+                    gridContainer.innerHTML = '<div class="error">No valid BONE/WBONE pool data (excluding WETH, USDT, USDC, DAI, BTC, knBONE).</div>';
+                    return;
+                }
+
+                console.log('Final pools to display (sorted by liquidity, deduplicated):', sortedPools);
+
+                adjustContainerSize(sortedPools.length);
+
+                const positions = layoutItems(sortedPools);
+
+                gridContainer.className = 'grid-container';
+                gridContainer.innerHTML = positions.map(({ x, y, gridSize, pool }) => {
+                    const size = gridSize * CELL_SIZE;
+                    const fontSize = Math.max(8, size / 5);
+                    if (pool.isPlaceholder) {
+                        return `
+                            <div class="grid-item more" 
+                                 style="left: ${x * CELL_SIZE}px; top: ${y * CELL_SIZE}px; width: ${size}px; height: ${size}px; font-size: ${fontSize}px;">
+                                ${pool.name}
+                            </div>
+                        `;
+                    }
+                    return `
+                        <div class="grid-item ${pool.priceChange >= 0 ? 'up' : 'down'}" 
+                             style="left: ${x * CELL_SIZE}px; top: ${y * CELL_SIZE}px; width: ${size}px; height: ${size}px;">
+                            <div class="token-symbol" style="font-size: ${fontSize}px; width: ${size - 4}px;">${pool.name}</div>
+                            <div class="price-change" style="font-size: ${fontSize * 0.8}px;">${pool.priceChange >= 0 ? '+' : ''}${pool.priceChange}%</div>
+                            <div class="txn" style="font-size: ${fontSize * 0.7}px;">TXN: ${pool.txn}</div>
+                            <div class="tooltip">
+                                24h Volume: $${pool.volume}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                const downloadBtn = document.getElementById('download-btn');
+                downloadBtn.style.display = 'block';
+                downloadBtn.addEventListener('click', () => {
+                    const tempContainer = document.createElement('div');
+                    tempContainer.style.width = `${CONTAINER_SIZE}px`;
+                    tempContainer.style.height = `${CONTAINER_SIZE}px`;
+                    tempContainer.style.position = 'absolute';
+                    tempContainer.style.left = '-9999px';
+                    tempContainer.innerHTML = gridContainer.innerHTML;
+                    document.body.appendChild(tempContainer);
+
+                    html2canvas(tempContainer, {
+                        width: CONTAINER_SIZE,
+                        height: CONTAINER_SIZE,
+                        scale: 1000 / CONTAINER_SIZE
+                    }).then(canvas => {
+                        const link = document.createElement('a');
+                        link.download = 'shibarium-pools.png';
+                        link.href = canvas.toDataURL('image/png');
+                        link.click();
+                        document.body.removeChild(tempContainer);
+                    });
+                });
+
+            } catch (error) {
+                gridContainer.innerHTML = `<div class="error">Failed to load: ${error.message}. Please check network or try again later.</div>`;
+                console.error('API Error:', error);
+            }
+        }
+
+        // Auto-update every 1 minute
+        function startAutoUpdate() {
+            setInterval(fetchShibariumPools, 1 * 60 * 1000); // 1 minute
+        }
+
+        // Initial load and start auto-update
+        fetchShibariumPools();
+        startAutoUpdate();
+    </script>
+</body>
+</html>
